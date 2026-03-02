@@ -83,6 +83,10 @@ This project includes a `docker-compose.yml` that seamlessly spins up the Node.j
    
    # Redis Configuration
    REDIS_URL=redis://localhost:6379
+
+   # Stripe Configuration
+   STRIPE_SECRET_KEY=sk_test_your_secret_key...
+   STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret...
    ```
 
 4. **Start the Application:**

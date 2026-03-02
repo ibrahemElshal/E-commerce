@@ -3,7 +3,7 @@ const sequelize = require('../config/database');
 const { Op } = require('sequelize');
 const { NotFoundError, BadRequestError, ForbiddenError } = require('../utils/errors');
 class OrderService {
-    async checkout(userId, shippingAddress, currentUserShippingAddress) {
+    async checkout(userId, shippingAddress, currentUser) {
         const transaction = await sequelize.transaction();
         try {
             const cartItems = await Cart.findAll({
@@ -24,11 +24,13 @@ class OrderService {
             const orderNumber = 'ORD-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9).toUpperCase();
             const order = await Order.create({
                 orderNumber,
-                userId,
+                customerId: userId, // Fixed relation to match model schema
                 totalAmount,
-                shippingAddress: shippingAddress || currentUserShippingAddress,
+                status: 'pending',
+                shippingAddress: shippingAddress || currentUser?.shippingAddress || 'No Address Provided',
                 expectedDeliveryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
             }, { transaction });
+
             for (const item of cartItems) {
                 await OrderItem.create({
                     orderId: order.id,
@@ -36,29 +38,80 @@ class OrderService {
                     quantity: item.quantity,
                     priceAtTime: item.priceAtTime
                 }, { transaction });
+            }
+
+            // Generate Payment Intent from Stripe
+            const paymentService = require('./paymentService');
+            const paymentIntent = await paymentService.createPaymentIntent(totalAmount, order.id, currentUser.email);
+
+            // Save Payment Intent ID to the Order
+            order.paymentIntentId = paymentIntent.id;
+            await order.save({ transaction });
+
+            await transaction.commit();
+
+            return {
+                order: {
+                    id: order.id,
+                    orderNumber: order.orderNumber,
+                    totalAmount: order.totalAmount,
+                    status: order.status
+                },
+                clientSecret: paymentIntent.client_secret
+            };
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
+        }
+    }
+    async handlePaymentSuccess(paymentIntentId) {
+        const transaction = await sequelize.transaction();
+        try {
+            const order = await Order.findOne({
+                where: { paymentIntentId },
+                include: [{ model: OrderItem }],
+                transaction
+            });
+
+            if (!order) {
+                throw new NotFoundError('Order not found for matching Payment Intent');
+            }
+
+            if (order.status !== 'pending') {
+                // Prevent double processing
+                await transaction.rollback();
+                return order;
+            }
+
+            // Decrement stock for all items
+            for (const item of order.OrderItems) {
                 await Product.decrement('quantity', {
                     by: item.quantity,
                     where: { id: item.productId },
                     transaction
                 });
             }
+
+            // Clear the User's cart
             await Cart.destroy({
-                where: { userId },
+                where: { userId: order.customerId }, // Note: using customerId
                 transaction
             });
+
+            // Mark the order as Paid / Processing
+            order.status = 'processing';
+            order.paidAt = new Date();
+            await order.save({ transaction });
+
             await transaction.commit();
-            const completeOrder = await Order.findByPk(order.id, {
-                include: [{
-                    model: OrderItem,
-                    include: [Product]
-                }]
-            });
-            return completeOrder;
+            return order;
         } catch (error) {
             await transaction.rollback();
+            console.error('Webhook processing error for paymentIntent:', paymentIntentId, error);
             throw error;
         }
     }
+
     async getUserOrders(userId, page = 1, limit = 10, status) {
         const offset = (page - 1) * limit;
         const where = { userId };

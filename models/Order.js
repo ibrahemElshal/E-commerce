@@ -38,6 +38,15 @@ const Order = sequelize.define('Order', {
   actualDeliveryDate: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  paymentIntentId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true
+  },
+  paidAt: {
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   timestamps: true,

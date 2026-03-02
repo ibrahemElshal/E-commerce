@@ -19,6 +19,39 @@ const PORT = process.env.PORT || 3000;
 
 app.use(helmet());
 app.use(cors());
+
+// Stripe Webhook needs the raw unparsed body to verify signatures.
+// Therefore, it must be mounted BEFORE `express.json()` middleware.
+const paymentService = require('./services/paymentService');
+const orderService = require('./services/orderService');
+
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+
+    let event;
+    try {
+        event = paymentService.constructEvent(req.body, sig);
+    } catch (err) {
+        console.error(`Webhook signature verification failed.`, err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // Handle the event
+    if (event.type === 'payment_intent.succeeded') {
+        const paymentIntent = event.data.object;
+        try {
+            await orderService.handlePaymentSuccess(paymentIntent.id);
+            console.log(`Payment confirmed for intent ${paymentIntent.id}. Order updated.`);
+        } catch (err) {
+            console.error(`Failed resolving order for intent ${paymentIntent.id}`, err);
+            // We still return 200 to Stripe so it doesn't infinitely retry unless it's a severe database outage
+        }
+    }
+
+    // Return a 200 response to acknowledge receipt of the event
+    res.send();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

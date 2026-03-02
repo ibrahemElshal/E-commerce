@@ -1,9 +1,11 @@
+// controllers/orderController.js
 const orderService = require('../services/orderService');
+
 const orderController = {
   async checkout(req, res, next) {
     try {
       const { shippingAddress } = req.body;
-      const result = await orderService.checkout(req.user.id, shippingAddress, req.user.shippingAddress);
+      const result = await orderService.checkout(req.user.id, shippingAddress, req.user);
       res.status(201).json(result);
     } catch (error) {
       next(error);
