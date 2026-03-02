@@ -11,11 +11,12 @@ const Order = sequelize.define('Order', {
     allowNull: false,
     unique: true
   },
-  customerId: {
+  userId: {
     type: DataTypes.UUID,
     allowNull: false,
+    field: 'customerId',
     references: {
-      model: 'Customers',
+      model: 'Users',
       key: 'id'
     }
   },

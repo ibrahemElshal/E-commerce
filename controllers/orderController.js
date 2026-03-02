@@ -1,4 +1,3 @@
-// controllers/orderController.js
 const orderService = require('../services/orderService');
 
 const orderController = {

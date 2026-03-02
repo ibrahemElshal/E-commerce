@@ -6,11 +6,12 @@ const Cart = sequelize.define('Cart', {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true
   },
-  customerId: {
+  userId: {
     type: DataTypes.UUID,
     allowNull: false,
+    field: 'customerId',
     references: {
-      model: 'Customers',
+      model: 'Users',
       key: 'id'
     }
   },

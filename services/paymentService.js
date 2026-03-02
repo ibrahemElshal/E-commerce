@@ -2,44 +2,91 @@ const Stripe = require('stripe');
 
 class PaymentService {
     constructor() {
-        this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-            apiVersion: '2023-10-16',
-        });
+        this.stripe = null;
     }
 
-    /**
-     * Creates a Stripe Payment Intent for a given order amount.
-     * @param {number} amount - The amount in the smallest currency unit (e.g. cents).
-     * @param {string} orderId - The Order ID reference.
-     * @param {string} userEmail - The email of the customer.
-     * @returns {Promise<Stripe.PaymentIntent>}
-     */
-    async createPaymentIntent(amount, orderId, userEmail) {
+    getStripeClient() {
+        if (this.stripe) return this.stripe;
+
+        const secretKey = process.env.STRIPE_SECRET_KEY;
+        if (!secretKey) {
+            throw new Error('STRIPE_SECRET_KEY is not defined');
+        }
+
+        this.stripe = new Stripe(secretKey, {
+            apiVersion: '2023-10-16',
+        });
+        return this.stripe;
+    }
+
+    getWebhookSecret() {
+        const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+        if (!webhookSecret) {
+            throw new Error('STRIPE_WEBHOOK_SECRET is not defined');
+        }
+        return webhookSecret;
+    }
+
+    
+    async createPaymentIntent(amount, orderId, userEmail, idempotencyKey = null) {
         try {
-            const paymentIntent = await this.stripe.paymentIntents.create({
-                amount: Math.round(amount * 100), // Convert to cents
-                currency: 'usd',
-                receipt_email: userEmail,
-                metadata: {
-                    orderId: orderId.toString()
-                }
-            });
+            
+            if (!amount || isNaN(amount) || Number(amount) <= 0) {
+                throw new Error('Invalid payment amount');
+            }
+
+            if (!orderId) {
+                throw new Error('Order ID is required');
+            }
+
+            if (!userEmail) {
+                throw new Error('User email is required');
+            }
+
+            
+            const cents = Math.round(Number(amount) * 100);
+
+           
+            const stripe = this.getStripeClient();
+            const paymentIntent = await stripe.paymentIntents.create(
+                {
+                    amount: cents,
+                    currency: 'usd',
+                    receipt_email: userEmail,
+
+                    automatic_payment_methods: {
+                        enabled: true,
+                    },
+
+                    metadata: {
+                        orderId: orderId.toString(),
+                    },
+                },
+                idempotencyKey
+                    ? { idempotencyKey }
+                    : undefined
+            );
+
             return paymentIntent;
+
         } catch (error) {
-            console.error('Stripe Payment Intent Error:', error);
-            throw new Error('Failed to create payment intent with Stripe');
+            console.error('Stripe Payment Intent Error:', error.message);
+            throw error;
         }
     }
 
-    /**
-     * Reconstructs the raw webhook payload.
-     */
     constructEvent(rawBody, signature) {
-        return this.stripe.webhooks.constructEvent(
-            rawBody,
-            signature,
-            process.env.STRIPE_WEBHOOK_SECRET
-        );
+        try {
+            const stripe = this.getStripeClient();
+            return stripe.webhooks.constructEvent(
+                rawBody,
+                signature,
+                this.getWebhookSecret()
+            );
+        } catch (error) {
+            console.error('Stripe Webhook Verification Failed:', error.message);
+            throw new Error('Invalid Stripe webhook signature');
+        }
     }
 }
 

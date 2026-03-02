@@ -21,10 +21,14 @@ class OrderService {
                 }
                 totalAmount += item.quantity * parseFloat(item.priceAtTime);
             }
-            const orderNumber = 'ORD-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+            const orderNumber =
+                'ORD-' +
+                Date.now() +
+                '-' +
+                Math.random().toString(36).slice(2, 11).toUpperCase();
             const order = await Order.create({
                 orderNumber,
-                customerId: userId, // Fixed relation to match model schema
+                userId,
                 totalAmount,
                 status: 'pending',
                 shippingAddress: shippingAddress || currentUser?.shippingAddress || 'No Address Provided',
@@ -40,11 +44,9 @@ class OrderService {
                 }, { transaction });
             }
 
-            // Generate Payment Intent from Stripe
             const paymentService = require('./paymentService');
             const paymentIntent = await paymentService.createPaymentIntent(totalAmount, order.id, currentUser.email);
 
-            // Save Payment Intent ID to the Order
             order.paymentIntentId = paymentIntent.id;
             await order.save({ transaction });
 
@@ -78,12 +80,10 @@ class OrderService {
             }
 
             if (order.status !== 'pending') {
-                // Prevent double processing
                 await transaction.rollback();
                 return order;
             }
 
-            // Decrement stock for all items
             for (const item of order.OrderItems) {
                 await Product.decrement('quantity', {
                     by: item.quantity,
@@ -92,13 +92,11 @@ class OrderService {
                 });
             }
 
-            // Clear the User's cart
             await Cart.destroy({
-                where: { userId: order.customerId }, // Note: using customerId
+                where: { userId: order.userId },
                 transaction
             });
 
-            // Mark the order as Paid / Processing
             order.status = 'processing';
             order.paidAt = new Date();
             await order.save({ transaction });
